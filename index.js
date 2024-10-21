@@ -26,14 +26,14 @@ app.post('/contentful-webhook', async (req, res) => {
     try {
       // Prepare product data for CommerceTools
       const productData = {
-        name: { en: fields.productName['en-US'] },
-        slug: { en: fields.productSlug['en-US'] },
+        name: { en: fields.name['en-US'] },
+        slug: { en: fields.slug['en-US'] },
         productType: {
           typeId: 'product-type',
           id: '346f4d9f-2ac3-4d4f-8517-a90a3e238361', // Product type ID in CommerceTools
         },
         masterVariant: {
-          sku: fields.sku['en-US'],
+          sku: fields.sku1['en-US'],
           prices: [
             {
               value: {
