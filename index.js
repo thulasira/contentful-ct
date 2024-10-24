@@ -1,68 +1,96 @@
+require('dotenv').config(); // Load environment variables from a .env file
 const express = require('express');
-const bodyParser = require('body-parser');
-const { ClientBuilder } = require('@commercetools/sdk-client-v2');
+const axios = require('axios');
+const { Console } = require('console');
 
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json());
 
-const projectKey = 'dxp-global';
-const client = new ClientBuilder()
-  .withClientCredentialsFlow({
-    host: 'https://api.europe-west1.gcp.commercetools.com',
-    projectKey,
-    credentials: {
-      clientId: 'fH9eWYnw8KmabjlNh-q35rEu',
-      clientSecret: 'DwLBMJhGmbKpXK75H4oCcrlHUZtXycna',
-    },
-  })
-  .withProjectKey(projectKey)
-  .build();
+// Function to get the access token
+const getCommerceToolsAccessToken = async () => {
+  try {
+    const response = await axios.post(
+      'https://auth.europe-west1.gcp.commercetools.com/oauth/token', // Replace with your region-specific URL
+      new URLSearchParams({
+        grant_type: 'client_credentials',
+        scope: `manage_project:${process.env.COMMERCETOOLS_PROJECT_KEY}`, // Replace with your project key
+      }),
+      {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${process.env.COMMERCETOOLS_CLIENT_ID}:${process.env.COMMERCETOOLS_CLIENT_SECRET}`).toString('base64')}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
 
-// Middleware to handle incoming webhook from Contentful
+    // Return the access token from the response
+    return response.data.access_token;
+  } catch (error) {
+    console.error('Error fetching access token:', error.response ? error.response.data : error.message);
+    throw new Error('Failed to get access token');
+  }
+};
+
+// Webhook endpoint to create a product
 app.post('/contentful-webhook', async (req, res) => {
   const { sys, fields } = req.body;
-  
-  if (sys.type === 'Entry' && sys.publishedVersion) {
+
+  // Validate request payload
+  if (sys && sys.name) {
+    console.log("as",fields.name['en-US']);
     try {
+      // Fetch the access token
+      const accessToken = await getCommerceToolsAccessToken();
+
       // Prepare product data for CommerceTools
-      const productData = {
+      const productData = { 
         name: { en: fields.name['en-US'] },
         slug: { en: fields.slug['en-US'] },
         productType: {
           typeId: 'product-type',
-          id: '346f4d9f-2ac3-4d4f-8517-a90a3e238361', // Product type ID in CommerceTools
+          id: '346f4d9f-2ac3-4d4f-8517-a90a3e238361' // Example Product type ID in CommerceTools
         },
+        name: { "en-US": fields.name['en-US']},
+        slug: { "en-US": fields.slug['en-US']},
         masterVariant: {
           sku: fields.sku1['en-US'],
           prices: [
             {
               value: {
-                currencyCode: 'USD',
-                centAmount: fields.price['en-US'] * 100,
+                currencyCode: "USD",
+                centAmount: (fields.price['en-US'] * 100 ), // Default to 15 USD
               },
             },
           ],
         },
       };
 
-      // Create a new product in CommerceTools
-      const response = await client.execute({
-        uri: `/products`,
-        method: 'POST',
-        body: productData,
-      });
+      // Send product data to CommerceTools
+      const response = await axios.post(
+        `https://api.europe-west1.gcp.commercetools.com/${process.env.COMMERCETOOLS_PROJECT_KEY}/products`,
+        productData,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
 
-      console.log('Product created in CommerceTools:', response);
-      res.status(200).send('Product created successfully');
+      // Respond with success message
+      res.status(200).json({ message: 'Product created successfully', data: response.data });
     } catch (error) {
-      console.error('Error creating product in CommerceTools:', error);
-      res.status(500).send('Failed to create product');
+      // Handle errors
+    
+      console.error('Error creating product:', error.response ? error.response.data : error.message);
+      res.status(500).json({ error: 'Failed to create product' });
     }
   } else {
-    res.status(400).send('Unsupported webhook event');
+    res.status(400).json({ error: 'Invalid data: name is required' });
   }
 });
 
-app.listen(3000, () => {
-  console.log('Webhook receiver is running on port 3000');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
